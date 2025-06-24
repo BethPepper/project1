@@ -119,6 +119,7 @@ def make_prediction(text, model_choice, models):
         prediction = None
         probabilities = None
 
+        
         if model_choice == "svm":
             if models.get('vectorizer_available') and models.get('svm_available'):
                 X = models['vectorizer'].transform([text])
