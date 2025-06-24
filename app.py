@@ -265,14 +265,14 @@ if page == "🏠 Home":
 elif page == "🔮 Single Prediction":
     st.header("🔮 Make a Single Prediction")
     st.markdown("Enter text below and select a model to see if it was human or AI written.")
-    
-    # Text input
-    if "text_input" not in st.session_state:
-        st.session_state["text_input"] = ""
-                
+
+    # Create separate session variable to control the text area value
+    if "text_input_value" not in st.session_state:
+        st.session_state["text_input_value"] = ""
+
     if models:
         available_models = get_available_models(models)
-        
+
         if available_models:
             # Model selection
             model_choice = st.selectbox(
@@ -280,18 +280,18 @@ elif page == "🔮 Single Prediction":
                 options=[model[0] for model in available_models],
                 format_func=lambda x: next(model[1] for model in available_models if model[0] == x)
             )
-            
-            #input text
+
+            # Text input field (NOTE: uses a different key now!)
             user_input = st.text_area(
                 "Enter your text here:",
-                value=st.session_state["text_input"],
+                value=st.session_state["text_input_value"],
                 height=150,
-                key="text_input"
+                key="text_area"
             )
 
             if user_input:
                 st.caption(f"Character count: {len(user_input)} | Word count: {len(user_input.split())}")
-            
+
             # Example texts
             with st.expander("📝 Try these example texts"):
                 examples = [
@@ -304,7 +304,7 @@ elif page == "🔮 Single Prediction":
                 for i, example in enumerate(examples):
                     with col1 if i % 2 == 0 else col2:
                         if st.button(f"Example {i+1}", key=f"example_{i}"):
-                            st.session_state["text_input"] = example
+                            st.session_state["text_input_value"] = example
                             st.experimental_rerun()
 
             # Prediction button
@@ -312,21 +312,21 @@ elif page == "🔮 Single Prediction":
                 if user_input.strip():
                     with st.spinner('Analyzing text...'):
                         prediction, probabilities = make_prediction(user_input, model_choice, models)
-                        
+
                         if prediction and probabilities is not None:
                             # Display prediction
                             col1, col2 = st.columns([3, 1])
-                            
+
                             with col1:
                                 if prediction == "Human":
                                     st.success(f"🧑 Prediction: **{prediction} Written**")
                                 else:
                                     st.error(f"🤖 Prediction: **{prediction} Written**")
-                            
+
                             with col2:
                                 confidence = max(probabilities)
                                 st.metric("Confidence", f"{confidence:.1%}")
-                            
+
                             # Probability details
                             st.subheader("📊 Prediction Probabilities")
                             col1, col2 = st.columns(2)
@@ -334,7 +334,7 @@ elif page == "🔮 Single Prediction":
                                 st.metric("🧑 Human", f"{probabilities[0]:.1%}")
                             with col2:
                                 st.metric("🤖 AI", f"{probabilities[1]:.1%}")
-                            
+
                             # Bar chart
                             class_names = ['Human', 'AI']
                             prob_df = pd.DataFrame({
