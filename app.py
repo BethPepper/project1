@@ -266,6 +266,10 @@ elif page == "🔮 Single Prediction":
     st.header("🔮 Make a Single Prediction")
     st.markdown("Enter text below and select a model to see if it was human or AI written.")
     
+    # Text input
+    if "text_input" not in st.session_state:
+        st.session_state["text_input"] = ""
+                
     if models:
         available_models = get_available_models(models)
         
@@ -277,14 +281,14 @@ elif page == "🔮 Single Prediction":
                 format_func=lambda x: next(model[1] for model in available_models if model[0] == x)
             )
             
-            # Text input
+            #input text
             user_input = st.text_area(
                 "Enter your text here:",
-                placeholder="Type or paste your text here...",
+                value=st.session_state["text_input"],
                 height=150,
                 key="text_input"
             )
-            
+
             if user_input:
                 st.caption(f"Character count: {len(user_input)} | Word count: {len(user_input.split())}")
             
@@ -300,9 +304,9 @@ elif page == "🔮 Single Prediction":
                 for i, example in enumerate(examples):
                     with col1 if i % 2 == 0 else col2:
                         if st.button(f"Example {i+1}", key=f"example_{i}"):
-                            st.session_state.text_input = example
-                            st.rerun()
-            
+                            st.session_state["text_input"] = example
+                            st.experimental_rerun()
+
             # Prediction button
             if st.button("🚀 Predict", type="primary"):
                 if user_input.strip():
