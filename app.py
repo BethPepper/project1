@@ -119,28 +119,24 @@ def make_prediction(text, model_choice, models):
         prediction = None
         probabilities = None
 
-        
         if model_choice == "svm":
-            if models.get('vectorizer_available') and models.get('svm_available'):
-                X = models['vectorizer'].transform([text])
-                prediction = models['svm'].predict(X)[0]
-                probabilities = models['svm'].predict_proba(X)[0]
+            if models.get('svm_available'):
+                prediction = models['svm'].predict([text])[0]
+                probabilities = models['svm'].predict_proba([text])[0]
 
         elif model_choice == "decision_tree":
-            if models.get('vectorizer_available') and models.get('dt_available'):
-                X = models['vectorizer'].transform([text])
-                prediction = models['decision_tree'].predict(X)[0]
-                probabilities = models['decision_tree'].predict_proba(X)[0]
+            if models.get('dt_available'):
+                prediction = models['decision_tree'].predict([text])[0]
+                probabilities = models['decision_tree'].predict_proba([text])[0]
 
         elif model_choice == "adaboost":
-            if models.get('vectorizer_available') and models.get('ab_available'):
-                X = models['vectorizer'].transform([text])
-                prediction = models['adaboost'].predict(X)[0]
-                probabilities = models['adaboost'].predict_proba(X)[0]
+            if models.get('ab_available'):
+                prediction = models['adaboost'].predict([text])[0]
+                probabilities = models['adaboost'].predict_proba([text])[0]
 
         if prediction is not None and probabilities is not None:
             # Convert to readable format
-            class_names = ['Human', 'AI']  # Update label names to match your project
+            class_names = ['Human', 'AI']  # Adjust if your labels are reversed
             prediction_label = class_names[prediction]
             return prediction_label, probabilities
         else:
