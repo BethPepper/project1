@@ -3,6 +3,7 @@
 #sources:
 # https://chatgpt.com/share/685a1cd9-fbe8-8002-b8dd-aa0349c93e7a
 #https://chatgpt.com/share/685aee73-bc9c-8002-ae26-f7b19274666c
+#https://chatgpt.com/share/685b2cab-0d0c-8002-86a4-9245f4a85bd6
 
 import streamlit as st
 import pandas as pd
@@ -47,14 +48,29 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 def extract_text_from_file(uploaded_file):
-    if uploaded_file.name.endswith('.pdf'):
+    filename = uploaded_file.name.lower()
+
+    if filename.endswith('.pdf'):
+        import pdfplumber
         with pdfplumber.open(uploaded_file) as pdf:
-            return "\n".join([page.extract_text() for page in pdf.pages if page.extract_text()])
-    elif uploaded_file.name.endswith('.docx'):
+            texts = []
+            for page in pdf.pages:
+                text = page.extract_text()
+                if text:
+                    texts.append(text)
+            return "\n".join(texts)
+
+    elif filename.endswith('.docx'):
+        import docx
         doc = docx.Document(uploaded_file)
         return "\n".join([para.text for para in doc.paragraphs])
+
     else:
-        return uploaded_file.read().decode('utf-8')
+        try:
+            return uploaded_file.read().decode('utf-8')
+        except UnicodeDecodeError:
+            return ""
+
 
 @st.cache_resource
 def load_models():
@@ -112,37 +128,45 @@ def load_models():
 
 def make_prediction(text, model_choice, models):
     """Make prediction using the selected model"""
-    if models is None:
+
+    if models is None or not models.get('vectorizer_available'):
         return None, None
 
     try:
+        # Preprocess the text (optional)
+        processed_text = text.lower()
+
+        # Vectorize text
+        vectorizer = models['vectorizer']
+        text_vector = vectorizer.transform([processed_text])  # This is a sparse matrix
+
         prediction = None
         probabilities = None
 
-        if model_choice == "svm":
-            if models.get('svm_available'):
-                prediction = models['svm'].predict([text])[0]
-                probabilities = models['svm'].predict_proba([text])[0]
+        if model_choice == "svm" and models.get('svm_available'):
+            model = models['svm']
+            prediction = model.predict(text_vector)[0]
+            probabilities = model.predict_proba(text_vector)[0]
 
-        elif model_choice == "decision_tree":
-            if models.get('dt_available'):
-                prediction = models['decision_tree'].predict([text])[0]
-                probabilities = models['decision_tree'].predict_proba([text])[0]
+        elif model_choice == "decision_tree" and models.get('dt_available'):
+            model = models['decision_tree']
+            prediction = model.predict(text_vector)[0]
+            probabilities = model.predict_proba(text_vector)[0]
 
-        elif model_choice == "adaboost":
-            if models.get('ab_available'):
-                prediction = models['adaboost'].predict([text])[0]
-                probabilities = models['adaboost'].predict_proba([text])[0]
+        elif model_choice == "adaboost" and models.get('ab_available'):
+            model = models['adaboost']
+            prediction = model.predict(text_vector)[0]
+            probabilities = model.predict_proba(text_vector)[0]
 
         if prediction is not None and probabilities is not None:
-            # Convert to readable format
-            class_names = ['Human', 'AI']  # Adjust if your labels are reversed
+            class_names = ['Human', 'AI']  # adjust labels if needed
             prediction_label = class_names[prediction]
             return prediction_label, probabilities
         else:
             return None, None
 
     except Exception as e:
+        import streamlit as st
         st.error(f"Error making prediction: {e}")
         st.error(f"Model choice: {model_choice}")
         st.error(f"Available models: {[k for k, v in models.items() if isinstance(v, bool) and v]}")
@@ -182,9 +206,6 @@ page = st.sidebar.selectbox(
 # Load models
 models = load_models()
 
-# ============================================================================
-# HOME PAGE
-# ============================================================================
 
 # ============================================================================
 # HOME PAGE
@@ -363,35 +384,46 @@ elif page == "📁 Batch Processing":
             uploaded_file = st.file_uploader(
                 "Choose a file",
                 type=['txt', 'csv', 'pdf', 'docx'],
-                help="Upload a .txt, .csv, .pdf, or .docx file. CSV must have text in first column."
+                help="Upload a .txt, .csv, .pdf, or .docx file. CSV must have text in first column.",
+                key="batch_file_uploader"
             )
 
             if uploaded_file:
-                # Model selection
                 model_choice = st.selectbox(
                     "Choose model for batch processing:",
                     options=[model[0] for model in available_models],
-                    format_func=lambda x: next(model[1] for model in available_models if model[0] == x)
+                    format_func=lambda x: next(model[1] for model in available_models if model[0] == x),
+                    key="batch_model_choice"
                 )
 
-                if st.button("📊 Process File"):
+                if st.button("📊 Process File", key="process_file_button"):
                     try:
-                        # Handle different file types
-                        if uploaded_file.name.endswith('.txt'):
-                            content = str(uploaded_file.read(), "utf-8")
+                        filename = uploaded_file.name.lower()
+
+                        if filename.endswith('.txt'):
+                            content = uploaded_file.read().decode("utf-8")
                             texts = [line.strip() for line in content.split('\n') if line.strip()]
-                        elif uploaded_file.name.endswith('.csv'):
+
+                        elif filename.endswith('.csv'):
+                            uploaded_file.seek(0)
                             df = pd.read_csv(uploaded_file)
-                            texts = df.iloc[:, 0].astype(str).tolist()
-                        elif uploaded_file.name.endswith('.pdf') or uploaded_file.name.endswith('.docx'):
-                            extracted_text = extract_text_from_file(uploaded_file)
+                            if df.shape[1] < 1:
+                                st.error("CSV file has no columns.")
+                                texts = []
+                            else:
+                                texts = df.iloc[:, 0].astype(str).tolist()
+
+                        elif filename.endswith('.pdf') or filename.endswith('.docx'):
+                            uploaded_file.seek(0)
+                            extracted_text = extract_text_from_file(uploaded_file) or ""
                             texts = [para.strip() for para in extracted_text.split('\n') if para.strip()]
+
                         else:
                             st.error("Unsupported file format.")
                             texts = []
 
                         if not texts:
-                            st.error("No text found in file.")
+                            st.error("No text found in the uploaded file.")
                         else:
                             st.info(f"Processing {len(texts)} texts...")
                             results = []
@@ -400,7 +432,7 @@ elif page == "📁 Batch Processing":
                             for i, text in enumerate(texts):
                                 prediction, probabilities = make_prediction(text, model_choice, models)
 
-                                if prediction and probabilities is not None:
+                                if prediction is not None and probabilities is not None:
                                     results.append({
                                         'Text': text[:100] + "..." if len(text) > 100 else text,
                                         'Full_Text': text,
@@ -416,7 +448,6 @@ elif page == "📁 Batch Processing":
                                 st.success(f"✅ Processed {len(results)} texts successfully!")
                                 results_df = pd.DataFrame(results)
 
-                                # Summary
                                 st.subheader("📊 Summary Statistics")
                                 col1, col2, col3, col4 = st.columns(4)
 
@@ -433,11 +464,9 @@ elif page == "📁 Batch Processing":
                                 with col4:
                                     st.metric("Avg Confidence", f"{avg_conf:.1f}%")
 
-                                # Results preview
                                 st.subheader("📋 Results Preview")
                                 st.dataframe(results_df[['Text', 'Prediction', 'Confidence']], use_container_width=True)
 
-                                # Download button
                                 csv = results_df.to_csv(index=False)
                                 st.download_button(
                                     label="📥 Download Full Results",
@@ -447,11 +476,11 @@ elif page == "📁 Batch Processing":
                                 )
                             else:
                                 st.error("No valid texts could be processed.")
+
                     except Exception as e:
                         st.error(f"Error processing file: {e}")
             else:
                 st.info("Please upload a file to get started.")
-
                 with st.expander("📄 Example File Formats"):
                     st.markdown("""
                     **Text File (.txt):**
@@ -472,7 +501,6 @@ elif page == "📁 Batch Processing":
     else:
         st.warning("Models not loaded. Please check the model files.")
 
-
 # ============================================================================
 # MODEL COMPARISON PAGE
 # ============================================================================
@@ -491,54 +519,57 @@ elif page == "⚖️ Model Comparison":
                 height=100
             )
 
-            if st.button("📊 Compare All Models") and comparison_text.strip():
-                st.subheader("🔍 Model Comparison Results")
+            if st.button("📊 Compare All Models"):
 
-                comparison_results = []
-
-                for model_key, model_name in available_models:
-                    prediction, probabilities = make_prediction(comparison_text, model_key, models)
-
-                    if prediction and probabilities is not None:
-                        comparison_results.append({
-                            'Model': model_name,
-                            'Prediction': prediction,
-                            'Confidence': f"{max(probabilities):.1%}",
-                            'Human %': f"{probabilities[0]:.1%}",
-                            'AI %': f"{probabilities[1]:.1%}",
-                            'Raw_Probs': probabilities
-                        })
-
-                if comparison_results:
-                    comparison_df = pd.DataFrame(comparison_results)
-                    st.table(comparison_df[['Model', 'Prediction', 'Confidence', 'Human %', 'AI %']])
-
-                    predictions = [r['Prediction'] for r in comparison_results]
-                    if len(set(predictions)) == 1:
-                        st.success(f"✅ All models agree: **{predictions[0]} Written**")
-                    else:
-                        st.warning("⚠️ Models disagree on classification")
-                        for result in comparison_results:
-                            st.write(f"- **{result['Model']}** predicted: **{result['Prediction']}**")
-
-                    # Probability comparison
-                    st.subheader("📊 Detailed Probability Comparison")
-
-                    cols = st.columns(len(comparison_results))
-
-                    for i, result in enumerate(comparison_results):
-                        with cols[i]:
-                            st.write(f"**{result['Model']}**")
-                            chart_data = pd.DataFrame({
-                                'Class': ['Human', 'AI'],
-                                'Probability': result['Raw_Probs']
-                            })
-                            st.bar_chart(chart_data.set_index('Class'))
+                if not comparison_text.strip():
+                    st.warning("Please enter some text to compare.")
                 else:
-                    st.error("Failed to get predictions from models.")
+                    st.subheader("🔍 Model Comparison Results")
+
+                    comparison_results = []
+
+                    for model_key, model_name in available_models:
+                        prediction, probabilities = make_prediction(comparison_text, model_key, models)
+
+                        if prediction is not None and probabilities is not None:
+                            comparison_results.append({
+                                'Model': model_name,
+                                'Prediction': prediction,
+                                'Confidence': f"{max(probabilities):.1%}",
+                                'Human %': f"{probabilities[0]:.1%}",
+                                'AI %': f"{probabilities[1]:.1%}",
+                                'Raw_Probs': probabilities
+                            })
+
+                    if comparison_results:
+                        comparison_df = pd.DataFrame(comparison_results)
+                        st.table(comparison_df[['Model', 'Prediction', 'Confidence', 'Human %', 'AI %']])
+
+                        predictions = [r['Prediction'] for r in comparison_results]
+                        if len(set(predictions)) == 1:
+                            st.success(f"✅ All models agree: **{predictions[0]} Written**")
+                        else:
+                            st.warning("⚠️ Models disagree on classification")
+                            for result in comparison_results:
+                                st.write(f"- **{result['Model']}** predicted: **{result['Prediction']}**")
+
+                        st.subheader("📊 Detailed Probability Comparison")
+
+                        cols = st.columns(len(comparison_results))
+
+                        for i, result in enumerate(comparison_results):
+                            with cols[i]:
+                                st.write(f"**{result['Model']}**")
+                                chart_data = pd.DataFrame({
+                                    'Class': ['Human', 'AI'],
+                                    'Probability': result['Raw_Probs']
+                                })
+                                st.bar_chart(chart_data.set_index('Class'))
+                    else:
+                        st.error("Failed to get predictions from models.")
 
         elif len(available_models) == 1:
-            st.info("Only one model available. Use Single Prediction page for detailed analysis.")
+            st.info("Only one model available. Use the Single Prediction page for detailed analysis.")
         else:
             st.error("No models available for comparison.")
     else:
