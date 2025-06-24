@@ -305,7 +305,7 @@ elif page == "🔮 Single Prediction":
                     with col1 if i % 2 == 0 else col2:
                         if st.button(f"Example {i+1}", key=f"example_{i}"):
                             st.session_state["text_input_value"] = example
-                            st.experimental_rerun()
+                            st.rerun()
 
             # Prediction button
             if st.button("🚀 Predict", type="primary"):
