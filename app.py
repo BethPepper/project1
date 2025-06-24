@@ -127,50 +127,46 @@ def load_models():
 # ============================================================================
 
 def make_prediction(text, model_choice, models):
-    """Make prediction using the selected model"""
-
-    if models is None or not models.get('vectorizer_available'):
+    if models is None:
         return None, None
 
     try:
-        # Preprocess the text (optional)
-        processed_text = text.lower()
+        # Vectorize input text
+        vectorizer = models.get('vectorizer')
+        if vectorizer is None:
+            st.error("Vectorizer not loaded")
+            return None, None
 
-        # Vectorize text
-        vectorizer = models['vectorizer']
-        text_vector = vectorizer.transform([processed_text])  # This is a sparse matrix
+        text_vector = vectorizer.transform([text])  # This produces a csr_matrix
 
         prediction = None
         probabilities = None
 
         if model_choice == "svm" and models.get('svm_available'):
-            model = models['svm']
-            prediction = model.predict(text_vector)[0]
-            probabilities = model.predict_proba(text_vector)[0]
+            prediction = models['svm'].predict(text_vector)[0]
+            probabilities = models['svm'].predict_proba(text_vector)[0]
 
         elif model_choice == "decision_tree" and models.get('dt_available'):
-            model = models['decision_tree']
-            prediction = model.predict(text_vector)[0]
-            probabilities = model.predict_proba(text_vector)[0]
+            prediction = models['decision_tree'].predict(text_vector)[0]
+            probabilities = models['decision_tree'].predict_proba(text_vector)[0]
 
         elif model_choice == "adaboost" and models.get('ab_available'):
-            model = models['adaboost']
-            prediction = model.predict(text_vector)[0]
-            probabilities = model.predict_proba(text_vector)[0]
+            prediction = models['adaboost'].predict(text_vector)[0]
+            probabilities = models['adaboost'].predict_proba(text_vector)[0]
 
         if prediction is not None and probabilities is not None:
-            class_names = ['Human', 'AI']  # adjust labels if needed
+            class_names = ['Human', 'AI']  # adjust if needed
             prediction_label = class_names[prediction]
             return prediction_label, probabilities
         else:
             return None, None
 
     except Exception as e:
-        import streamlit as st
         st.error(f"Error making prediction: {e}")
         st.error(f"Model choice: {model_choice}")
         st.error(f"Available models: {[k for k, v in models.items() if isinstance(v, bool) and v]}")
         return None, None
+
 
 
 def get_available_models(models):
