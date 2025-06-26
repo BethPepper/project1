@@ -131,40 +131,32 @@ def make_prediction(text, model_choice, models):
         return None, None
 
     try:
-        # Vectorize input text
-        vectorizer = models.get('vectorizer')
-        if vectorizer is None:
-            st.error("Vectorizer not loaded")
+        model = models.get(model_choice)
+        if model is None:
+            st.error("Model not found")
             return None, None
 
-        text_vector = vectorizer.transform([text])  # This produces a csr_matrix
+        # Determine if model is a pipeline (includes vectorizer)
+        is_pipeline = hasattr(model, 'named_steps')  # sklearn pipeline check
 
-        prediction = None
-        probabilities = None
-
-        if model_choice == "svm" and models.get('svm_available'):
-            prediction = models['svm'].predict(text_vector)[0]
-            probabilities = models['svm'].predict_proba(text_vector)[0]
-
-        elif model_choice == "decision_tree" and models.get('dt_available'):
-            prediction = models['decision_tree'].predict(text_vector)[0]
-            probabilities = models['decision_tree'].predict_proba(text_vector)[0]
-
-        elif model_choice == "adaboost" and models.get('ab_available'):
-            prediction = models['adaboost'].predict(text_vector)[0]
-            probabilities = models['adaboost'].predict_proba(text_vector)[0]
-
-        if prediction is not None and probabilities is not None:
-            class_names = ['Human', 'AI']  # adjust if needed
-            prediction_label = class_names[prediction]
-            return prediction_label, probabilities
+        if is_pipeline:
+            prediction = model.predict([text])[0]
+            probabilities = model.predict_proba([text])[0]
         else:
-            return None, None
+            vectorizer = models.get('vectorizer')
+            if vectorizer is None:
+                st.error("Vectorizer not loaded")
+                return None, None
+            text_vector = vectorizer.transform([text])
+            prediction = model.predict(text_vector)[0]
+            probabilities = model.predict_proba(text_vector)[0]
+
+        class_names = ['Human', 'AI']
+        prediction_label = class_names[prediction]
+        return prediction_label, probabilities
 
     except Exception as e:
         st.error(f"Error making prediction: {e}")
-        st.error(f"Model choice: {model_choice}")
-        st.error(f"Available models: {[k for k, v in models.items() if isinstance(v, bool) and v]}")
         return None, None
 
 
