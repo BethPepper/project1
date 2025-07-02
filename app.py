@@ -16,19 +16,11 @@ import pdfplumber
 import docx
 import torch
 import torch.nn as nn
+import numpy as np
 
-
-def load_glove(glove_file):
-    embeddings_index = {}
-    with open(glove_file, encoding='utf-8') as f:
-        for line in f:
-            values = line.split()
-            word = values[0]
-            coefs = np.asarray(values[1:], dtype='float32')
-            embeddings_index[word] = coefs
-    return embeddings_index
-
-
+# =======================
+# Deep Learning Models
+# =======================
 
 class TextCNN(nn.Module):
     def __init__(self):
@@ -66,6 +58,18 @@ class TextRNN(nn.Module):
         rnn_out, h_n = self.rnn(x)
         out = self.fc1(h_n[-1])
         return out
+    
+    
+def load_glove(glove_file):
+    embeddings_index = {}
+    with open(glove_file, encoding='utf-8') as f:
+        for line in f:
+            values = line.split()
+            word = values[0]
+            coefs = np.asarray(values[1:], dtype='float32')
+            embeddings_index[word] = coefs
+    return embeddings_index
+
 
 
 
