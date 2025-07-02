@@ -17,19 +17,46 @@ import docx
 import torch
 import torch.nn as nn
 
+from torchtext.vocab import build_vocab_from_iterator
+
+# =======================
+# Tokenizer and Vocabulary Setup
+# =======================
+
+# Simple tokenizer function
+def simple_tokenizer(text):
+    return text.lower().split()
+
+# Build vocab from sample_texts.txt
+try:
+    with open('sample_texts.txt', 'r', encoding='utf-8') as f:
+        texts = f.readlines()
+
+    tokenized_texts = [simple_tokenizer(t) for t in texts]
+    vocab = build_vocab_from_iterator(tokenized_texts, specials=["<unk>"])
+    vocab.set_default_index(vocab["<unk>"])
+
+except Exception as e:
+    st.error(f"Error building vocab: {e}")
+    vocab = None
+
+
 # =======================
 # Deep Learning Models
 # =======================
 
 class TextCNN(nn.Module):
-    def __init__(self):
+    def __init__(self, vocab_size, embedding_dim=100):
         super(TextCNN, self).__init__()
-        self.conv1 = nn.Conv1d(in_channels=100, out_channels=128, kernel_size=3)
+        self.embedding = nn.Embedding(vocab_size, embedding_dim)
+        self.conv1 = nn.Conv1d(in_channels=embedding_dim, out_channels=128, kernel_size=3)
         self.pool = nn.MaxPool1d(kernel_size=2)
-        self.fc1 = nn.Linear(128 * 49, 2)
+        # Adjusted sequence length: (seq_len - kernel + 1) // pool_size
+        self.fc1 = nn.Linear(128 * ((100 - 3 + 1) // 2), 2)
 
     def forward(self, x):
-        x = x.permute(0, 2, 1)
+        x = self.embedding(x)  # (batch, seq_len, embed_dim)
+        x = x.permute(0, 2, 1)  # (batch, embed_dim, seq_len)
         x = torch.relu(self.conv1(x))
         x = self.pool(x)
         x = x.view(x.size(0), -1)
@@ -37,55 +64,31 @@ class TextCNN(nn.Module):
         return x
 
 class TextLSTM(nn.Module):
-    def __init__(self):
+    def __init__(self, vocab_size, embedding_dim=100):
         super(TextLSTM, self).__init__()
-        self.lstm = nn.LSTM(input_size=100, hidden_size=128, batch_first=True)
+        self.embedding = nn.Embedding(vocab_size, embedding_dim)
+        self.lstm = nn.LSTM(embedding_dim, hidden_size=128, batch_first=True)
         self.fc1 = nn.Linear(128, 2)
 
     def forward(self, x):
+        x = self.embedding(x)  # (batch, seq_len, embed_dim)
         lstm_out, (h_n, c_n) = self.lstm(x)
-        out = self.fc1(h_n[-1])
+        out = self.fc1(h_n[-1])  # last hidden state
         return out
 
 class TextRNN(nn.Module):
-    def __init__(self):
+    def __init__(self, vocab_size, embedding_dim=100):
         super(TextRNN, self).__init__()
-        self.rnn = nn.RNN(input_size=100, hidden_size=128, batch_first=True)
+        self.embedding = nn.Embedding(vocab_size, embedding_dim)
+        self.rnn = nn.RNN(embedding_dim, hidden_size=128, batch_first=True)
         self.fc1 = nn.Linear(128, 2)
 
     def forward(self, x):
+        x = self.embedding(x)  # (batch, seq_len, embed_dim)
         rnn_out, h_n = self.rnn(x)
-        out = self.fc1(h_n[-1])
+        out = self.fc1(h_n[-1])  # last hidden state
         return out
 
-# =======================
-# GloVe Embedding Loader
-# =======================
-import os
-import urllib.request
-import zipfile
-
-def download_glove():
-    glove_dir = "glove.6B.100d.txt"
-    if not os.path.exists(glove_dir):
-        url = "http://nlp.stanford.edu/data/glove.6B.zip"
-        print("Downloading GloVe embeddings...")
-        urllib.request.urlretrieve(url, "glove.6B.zip")
-        with zipfile.ZipFile("glove.6B.zip", 'r') as zip_ref:
-            zip_ref.extractall(".")
-        print("Download and extraction complete.")
-
-download_glove()
-
-def load_glove(glove_file):
-    embeddings_index = {}
-    with open(glove_file, encoding='utf-8') as f:
-        for line in f:
-            values = line.split()
-            word = values[0]
-            coefs = np.asarray(values[1:], dtype='float32')
-            embeddings_index[word] = coefs
-    return embeddings_index
 
 
 # Page Configuration
@@ -147,7 +150,7 @@ def extract_text_from_file(uploaded_file):
 
 
 @st.cache_resource
-def load_models():
+def load_models(vocab):
     models = {}
 
     try:
@@ -181,7 +184,7 @@ def load_models():
 
         # Load CNN model
         try:
-            cnn_model = TextCNN()
+            cnn_model = TextCNN(vocab_size=len(vocab))
             cnn_model.load_state_dict(torch.load('models/CNN.pt', map_location=torch.device('cpu')))
             cnn_model.eval()
             models['cnn'] = cnn_model
@@ -191,7 +194,7 @@ def load_models():
 
         # Load LSTM model
         try:
-            lstm_model = TextLSTM()
+            lstm_model = TextLSTM(vocab_size=len(vocab))
             lstm_model.load_state_dict(torch.load('models/LSTM.pt', map_location=torch.device('cpu')))
             lstm_model.eval()
             models['lstm'] = lstm_model
@@ -201,7 +204,7 @@ def load_models():
 
         # Load RNN model
         try:
-            rnn_model = TextRNN()
+            rnn_model = TextRNN(vocab_size=len(vocab))
             rnn_model.load_state_dict(torch.load('models/RNN.pt', map_location=torch.device('cpu')))
             rnn_model.eval()
             models['rnn'] = rnn_model
@@ -209,14 +212,16 @@ def load_models():
         except FileNotFoundError:
             models['rnn_available'] = False
 
-        # Final check for ML models (optional, adjust if DL models are sufficient alone)
-        individual_ready = models.get('vectorizer_available', False) and (
+        # Final check for ML or DL models availability
+        ml_ready = models.get('vectorizer_available', False) and (
             models.get('svm_available', False) or
             models.get('dt_available', False) or
             models.get('ab_available', False)
         )
 
-        if not individual_ready and not (models.get('cnn_available') or models.get('lstm_available') or models.get('rnn_available')):
+        dl_ready = models.get('cnn_available') or models.get('lstm_available') or models.get('rnn_available')
+
+        if not ml_ready and not dl_ready:
             st.error("No complete model setup found!")
             return None
 
@@ -227,12 +232,11 @@ def load_models():
         return None
 
 
-
 # ============================================================================
-# PREDICTION FUNCTION
+# PREDICTION FUNCTION FOR DEEP LEARNING MODELS (NO GloVe, uses vocab)
 # ============================================================================
 
-def make_prediction_dl(text, model_choice, models, embeddings_index, max_len=100):
+def make_prediction_dl(text, model_choice, models, vocab, max_len=100):
     if models is None:
         return None, None
 
@@ -242,22 +246,17 @@ def make_prediction_dl(text, model_choice, models, embeddings_index, max_len=100
             st.error("DL Model not found")
             return None, None
 
-        # Preprocess text: clean, tokenize, encode using embeddings_index
-        tokens = text.lower().split()  # adjust based on your actual cleaning pipeline
-
-        encoded = []
-        for token in tokens:
-            vector = embeddings_index.get(token)
-            if vector is not None:
-                encoded.append(vector)
+        # Tokenize and encode using vocab
+        tokens = text.lower().split()  # adjust based on your cleaning pipeline
+        encoded = [vocab.get(token, vocab['<unk>']) for token in tokens]
 
         # Pad or truncate to max_len
         if len(encoded) < max_len:
-            encoded += [np.zeros(100)] * (max_len - len(encoded))
+            encoded += [0] * (max_len - len(encoded))
         else:
             encoded = encoded[:max_len]
 
-        input_tensor = torch.tensor([encoded], dtype=torch.float32)
+        input_tensor = torch.tensor([encoded], dtype=torch.long)  # shape: (1, seq_len)
 
         with torch.no_grad():
             outputs = model(input_tensor)
@@ -270,39 +269,6 @@ def make_prediction_dl(text, model_choice, models, embeddings_index, max_len=100
 
     except Exception as e:
         st.error(f"Error making DL prediction: {e}")
-        return None, None
-
-def make_prediction(text, model_choice, models):
-    if models is None:
-        return None, None
-
-    try:
-        model = models.get(model_choice)
-        if model is None:
-            st.error("Model not found")
-            return None, None
-
-        # Determine if model is a pipeline (includes vectorizer)
-        is_pipeline = hasattr(model, 'named_steps')  # sklearn pipeline check
-
-        if is_pipeline:
-            prediction = model.predict([text])[0]
-            probabilities = model.predict_proba([text])[0]
-        else:
-            vectorizer = models.get('vectorizer')
-            if vectorizer is None:
-                st.error("Vectorizer not loaded")
-                return None, None
-            text_vector = vectorizer.transform([text])
-            prediction = model.predict(text_vector)[0]
-            probabilities = model.predict_proba(text_vector)[0]
-
-        class_names = ['Human', 'AI']
-        prediction_label = class_names[prediction]
-        return prediction_label, probabilities
-
-    except Exception as e:
-        st.error(f"Error making prediction: {e}")
         return None, None
 
 
@@ -334,7 +300,6 @@ def get_available_models(models):
 
     return available
 
-
 # ============================================================================
 # SIDEBAR NAVIGATION
 # ============================================================================
@@ -356,20 +321,7 @@ page = st.sidebar.selectbox(
 )
 
 # Load models (ML + DL)
-models = load_models()
-
-# Load embeddings for DL models if needed
-glove_path = "glove.6B.100d.txt"
-
-# Only load embeddings if DL pages are being used
-if page in ["🔮 Single Prediction", "📁 Batch Processing", "⚖️ Model Comparison"]:
-    try:
-        embeddings_index = load_glove(glove_path)
-    except Exception as e:
-        st.sidebar.error(f"Error loading GloVe embeddings: {e}")
-        embeddings_index = None
-else:
-    embeddings_index = None
+models = load_models(vocab)  # pass vocab as parameter
 
 # Sidebar info section
 st.sidebar.markdown("---")
@@ -387,8 +339,6 @@ Built with Streamlit
 **Frameworks:** scikit-learn, PyTorch  
 **Deployment:** Streamlit Cloud Ready
 """)
-
-
 
 # ============================================================================
 # HOME PAGE
@@ -454,7 +404,7 @@ if page == "🏠 Home":
             else:
                 st.warning("**⚡ AdaBoost**\n❌ Not Available")
 
-        # DL model status
+        # Deep Learning model status
         st.subheader("🧠 Deep Learning Models")
         col4, col5, col6 = st.columns(3)
 
@@ -478,7 +428,6 @@ if page == "🏠 Home":
 
     else:
         st.error("❌ Models not loaded. Please check the model files.")
-
 
 # ============================================================================
 # SINGLE PREDICTION PAGE
@@ -535,13 +484,9 @@ elif page == "🔮 Single Prediction":
                     with st.spinner('Analyzing text...'):
                         # Determine if DL model is selected
                         if model_choice in ['cnn', 'lstm', 'rnn']:
-                            if embeddings_index is None:
-                                st.error("Embeddings not loaded. Cannot use DL model.")
-                                prediction, probabilities = None, None
-                            else:
-                                prediction, probabilities = make_prediction_dl(
-                                    user_input, model_choice, models, embeddings_index
-                                )
+                            prediction, probabilities = make_prediction_dl(
+                                user_input, model_choice, models, vocab
+                            )
                         else:
                             prediction, probabilities = make_prediction(user_input, model_choice, models)
 
@@ -582,7 +527,6 @@ elif page == "🔮 Single Prediction":
             st.error("No models available for prediction.")
     else:
         st.warning("Models not loaded. Please check the model files.")
-
 
 # ============================================================================
 # BATCH PROCESSING PAGE
@@ -647,13 +591,9 @@ elif page == "📁 Batch Processing":
                             for i, text in enumerate(texts):
                                 # Use DL prediction if selected model is CNN/LSTM/RNN
                                 if model_choice in ['cnn', 'lstm', 'rnn']:
-                                    if embeddings_index is None:
-                                        st.error("Embeddings not loaded. Cannot use DL model.")
-                                        prediction, probabilities = None, None
-                                    else:
-                                        prediction, probabilities = make_prediction_dl(
-                                            text, model_choice, models, embeddings_index
-                                        )
+                                    prediction, probabilities = make_prediction_dl(
+                                        text, model_choice, models, vocab
+                                    )
                                 else:
                                     prediction, probabilities = make_prediction(text, model_choice, models)
 
@@ -756,13 +696,9 @@ elif page == "⚖️ Model Comparison":
                     for model_key, model_name in available_models:
                         # Use DL prediction if model is cnn, lstm, or rnn
                         if model_key in ['cnn', 'lstm', 'rnn']:
-                            if embeddings_index is None:
-                                st.error(f"Embeddings not loaded. Cannot use {model_name}.")
-                                prediction, probabilities = None, None
-                            else:
-                                prediction, probabilities = make_prediction_dl(
-                                    comparison_text, model_key, models, embeddings_index
-                                )
+                            prediction, probabilities = make_prediction_dl(
+                                comparison_text, model_key, models, vocab
+                            )
                         else:
                             prediction, probabilities = make_prediction(comparison_text, model_key, models)
 
@@ -810,7 +746,6 @@ elif page == "⚖️ Model Comparison":
     else:
         st.warning("Models not loaded. Please check the model files.")
 
-
 # ============================================================================
 # MODEL INFO PAGE
 # ============================================================================
@@ -842,8 +777,8 @@ elif page == "📊 Model Info":
             st.markdown("""
             ### 🧠 CNN (Convolutional Neural Network)
             **Type:** Deep Learning Model  
-            **Architecture:** Conv1D + MaxPool + Dense  
-            **Features:** GloVe embeddings
+            **Architecture:** Embedding + Conv1D + MaxPool + Dense  
+            **Features:** Randomly initialized embeddings
 
             **Strengths:**
             - Captures local n-gram features
@@ -867,8 +802,8 @@ elif page == "📊 Model Info":
             st.markdown("""
             ### 🧠 LSTM (Long Short-Term Memory)
             **Type:** Recurrent Neural Network  
-            **Architecture:** LSTM layers + Dense  
-            **Features:** GloVe embeddings
+            **Architecture:** Embedding + LSTM + Dense  
+            **Features:** Randomly initialized embeddings
 
             **Strengths:**
             - Captures sequential dependencies
@@ -895,8 +830,8 @@ elif page == "📊 Model Info":
             st.markdown("""
             ### 🧠 RNN (Simple Recurrent Neural Network)
             **Type:** Recurrent Neural Network  
-            **Architecture:** RNN layers + Dense  
-            **Features:** GloVe embeddings
+            **Architecture:** Embedding + RNN + Dense  
+            **Features:** Randomly initialized embeddings
 
             **Strengths:**
             - Captures sequential patterns
@@ -913,7 +848,7 @@ elif page == "📊 Model Info":
             - Stop Words: Removed (English)  
             - Extra Features (optional): Avg sentence length, punctuation %, etc.
 
-            **Embeddings:** GloVe  
+            **Embeddings:** Random initialized (Deep Learning models)  
             - Dimension: 100  
             - Max Sequence Length: 100 tokens
             """)
@@ -949,12 +884,13 @@ elif page == "📊 Model Info":
         **Preprocessing:**  
         - Clean and normalize text  
         - TF-IDF vectorization (for ML models)  
-        - GloVe embeddings (for DL models)  
+        - Tokenization and vocabulary encoding (for DL models)  
         **Evaluation:** Accuracy, precision, recall, F1-score, ROC-AUC  
         **Validation:** 5-fold cross-validation (ML models), holdout validation (DL models)
         """)
     else:
         st.warning("Models not loaded. Please check model files in the `models/` directory.")
+
 
 # ============================================================================
 # HELP PAGE
@@ -1004,9 +940,6 @@ elif page == "❓ Help":
           - `svm_model.pkl`, `decision_tree_model.pkl`, `adaboost_model.pkl`
           - `CNN.pt`, `LSTM.pt`, `RNN.pt` (required for Deep Learning models)
 
-        **Embeddings not loaded:**
-        - Ensure `glove.6B.100d.txt` is present in the project directory for DL models
-
         **Prediction issues:**
         - Make sure the input is valid text (not empty or corrupted)
         - Extremely short texts may give unreliable results
@@ -1030,13 +963,10 @@ elif page == "❓ Help":
     │   ├── CNN.pt
     │   ├── LSTM.pt
     │   └── RNN.pt
-    ├── glove.6B.100d.txt            # GloVe embeddings file for DL models
     ├── data/                        # Training/test data
     ├── notebooks/                   # Jupyter notebook work
     └── README.md                    # Documentation
     """)
-
-
 
 # ============================================================================
 # FOOTER
