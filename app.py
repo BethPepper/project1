@@ -17,6 +17,19 @@ import docx
 import torch
 import torch.nn as nn
 
+
+def load_glove(glove_file):
+    embeddings_index = {}
+    with open(glove_file, encoding='utf-8') as f:
+        for line in f:
+            values = line.split()
+            word = values[0]
+            coefs = np.asarray(values[1:], dtype='float32')
+            embeddings_index[word] = coefs
+    return embeddings_index
+
+
+
 class TextCNN(nn.Module):
     def __init__(self):
         super(TextCNN, self).__init__()
