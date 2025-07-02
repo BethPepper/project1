@@ -13,6 +13,27 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import pdfplumber
 import docx
+import torch
+import torch.nn as nn
+
+class TextCNN(nn.Module):
+    def __init__(self):
+        super(TextCNN, self).__init__()
+        self.conv1 = nn.Conv1d(in_channels=100, out_channels=128, kernel_size=3)
+        self.pool = nn.MaxPool1d(kernel_size=2)
+        self.fc1 = nn.Linear(128 * 49, 2)
+
+    def forward(self, x):
+        x = x.permute(0, 2, 1)
+        x = torch.relu(self.conv1(x))
+        x = self.pool(x)
+        x = x.view(x.size(0), -1)
+        x = self.fc1(x)
+        return x
+
+# Also define TextLSTM and TextRNN here as separate classes
+
+
 
 # Page Configuration
 st.set_page_config(
@@ -105,14 +126,44 @@ def load_models():
         except FileNotFoundError:
             models['ab_available'] = False
 
-        # Final check
+        # Load CNN model
+        try:
+            cnn_model = TextCNN()
+            cnn_model.load_state_dict(torch.load('models/CNN.pt', map_location=torch.device('cpu')))
+            cnn_model.eval()
+            models['cnn'] = cnn_model
+            models['cnn_available'] = True
+        except FileNotFoundError:
+            models['cnn_available'] = False
+
+        # Load LSTM model
+        try:
+            lstm_model = TextLSTM()
+            lstm_model.load_state_dict(torch.load('models/LSTM.pt', map_location=torch.device('cpu')))
+            lstm_model.eval()
+            models['lstm'] = lstm_model
+            models['lstm_available'] = True
+        except FileNotFoundError:
+            models['lstm_available'] = False
+
+        # Load RNN model
+        try:
+            rnn_model = TextRNN()
+            rnn_model.load_state_dict(torch.load('models/RNN.pt', map_location=torch.device('cpu')))
+            rnn_model.eval()
+            models['rnn'] = rnn_model
+            models['rnn_available'] = True
+        except FileNotFoundError:
+            models['rnn_available'] = False
+
+        # Final check for ML models (optional, adjust if DL models are sufficient alone)
         individual_ready = models.get('vectorizer_available', False) and (
             models.get('svm_available', False) or
             models.get('dt_available', False) or
             models.get('ab_available', False)
         )
 
-        if not individual_ready:
+        if not individual_ready and not (models.get('cnn_available') or models.get('lstm_available') or models.get('rnn_available')):
             st.error("No complete model setup found!")
             return None
 
@@ -122,41 +173,50 @@ def load_models():
         st.error(f"Error loading models: {e}")
         return None
 
+
+
 # ============================================================================
 # PREDICTION FUNCTION
 # ============================================================================
 
-def make_prediction(text, model_choice, models):
+def make_prediction_dl(text, model_choice, models, embeddings_index, max_len=100):
     if models is None:
         return None, None
 
     try:
         model = models.get(model_choice)
         if model is None:
-            st.error("Model not found")
+            st.error("DL Model not found")
             return None, None
 
-        # Determine if model is a pipeline (includes vectorizer)
-        is_pipeline = hasattr(model, 'named_steps')  # sklearn pipeline check
+        # Preprocess text: clean, tokenize, encode using embeddings_index
+        tokens = text.lower().split()  # adjust based on your actual cleaning pipeline
 
-        if is_pipeline:
-            prediction = model.predict([text])[0]
-            probabilities = model.predict_proba([text])[0]
+        encoded = []
+        for token in tokens:
+            vector = embeddings_index.get(token)
+            if vector is not None:
+                encoded.append(vector)
+
+        # Pad or truncate to max_len
+        if len(encoded) < max_len:
+            encoded += [np.zeros(100)] * (max_len - len(encoded))
         else:
-            vectorizer = models.get('vectorizer')
-            if vectorizer is None:
-                st.error("Vectorizer not loaded")
-                return None, None
-            text_vector = vectorizer.transform([text])
-            prediction = model.predict(text_vector)[0]
-            probabilities = model.predict_proba(text_vector)[0]
+            encoded = encoded[:max_len]
+
+        input_tensor = torch.tensor([encoded], dtype=torch.float32)
+
+        with torch.no_grad():
+            outputs = model(input_tensor)
+            probabilities = torch.softmax(outputs, dim=1).cpu().numpy()[0]
+            prediction = np.argmax(probabilities)
 
         class_names = ['Human', 'AI']
         prediction_label = class_names[prediction]
         return prediction_label, probabilities
 
     except Exception as e:
-        st.error(f"Error making prediction: {e}")
+        st.error(f"Error making DL prediction: {e}")
         return None, None
 
 
@@ -177,22 +237,71 @@ def get_available_models(models):
     if models.get('vectorizer_available') and models.get('ab_available'):
         available.append(("adaboost", "⚡ AdaBoost"))
 
+    if models.get('cnn_available'):
+        available.append(("cnn", "🧠 CNN"))
+
+    if models.get('lstm_available'):
+        available.append(("lstm", "🧠 LSTM"))
+
+    if models.get('rnn_available'):
+        available.append(("rnn", "🧠 RNN"))
+
     return available
+
 
 # ============================================================================
 # SIDEBAR NAVIGATION
 # ============================================================================
 
+# Sidebar navigation
 st.sidebar.title("🧭 Navigation")
 st.sidebar.markdown("Choose what you want to do:")
 
 page = st.sidebar.selectbox(
     "Select Page:",
-    ["🏠 Home", "🔮 Single Prediction", "📁 Batch Processing", "⚖️ Model Comparison", "📊 Model Info", "❓ Help"]
+    [
+        "🏠 Home",
+        "🔮 Single Prediction",
+        "📁 Batch Processing",
+        "⚖️ Model Comparison",
+        "📊 Model Info",
+        "❓ Help"
+    ]
 )
 
-# Load models
+# Load models (ML + DL)
 models = load_models()
+
+# Load embeddings for DL models if needed
+glove_path = "glove.6B.100d.txt"
+
+# Only load embeddings if DL pages are being used
+if page in ["🔮 Single Prediction", "📁 Batch Processing", "⚖️ Model Comparison"]:
+    try:
+        embeddings_index = load_glove(glove_path)
+    except Exception as e:
+        st.sidebar.error(f"Error loading GloVe embeddings: {e}")
+        embeddings_index = None
+else:
+    embeddings_index = None
+
+# Sidebar info section
+st.sidebar.markdown("---")
+st.sidebar.markdown("### 📚 App Information")
+st.sidebar.info("""
+**AI vs Human Text Detection App**  
+Built with Streamlit
+
+**Models Included:**  
+- 📈 Support Vector Machine (SVM)  
+- 🌳 Decision Tree  
+- ⚡ AdaBoost  
+- 🧠 CNN, LSTM, RNN (Deep Learning)
+
+**Frameworks:** scikit-learn, PyTorch  
+**Deployment:** Streamlit Cloud Ready
+""")
+
 
 
 # ============================================================================
@@ -204,7 +313,7 @@ if page == "🏠 Home":
     
     st.markdown("""
     Welcome to your machine learning web application! This app demonstrates **AI vs Human text detection**
-    using three trained models: **SVM**, **Decision Tree**, and **AdaBoost**.
+    using trained models: **SVM**, **Decision Tree**, **AdaBoost**, and **Deep Learning (CNN, LSTM, RNN)**.
     """)
     
     # App overview
@@ -259,6 +368,28 @@ if page == "🏠 Home":
             else:
                 st.warning("**⚡ AdaBoost**\n❌ Not Available")
 
+        # DL model status
+        st.subheader("🧠 Deep Learning Models")
+        col4, col5, col6 = st.columns(3)
+
+        with col4:
+            if models.get('cnn_available'):
+                st.info("**🧠 CNN**\n✅ Available")
+            else:
+                st.warning("**🧠 CNN**\n❌ Not Available")
+
+        with col5:
+            if models.get('lstm_available'):
+                st.info("**🧠 LSTM**\n✅ Available")
+            else:
+                st.warning("**🧠 LSTM**\n❌ Not Available")
+
+        with col6:
+            if models.get('rnn_available'):
+                st.info("**🧠 RNN**\n✅ Available")
+            else:
+                st.warning("**🧠 RNN**\n❌ Not Available")
+
     else:
         st.error("❌ Models not loaded. Please check the model files.")
 
@@ -286,7 +417,7 @@ elif page == "🔮 Single Prediction":
                 format_func=lambda x: next(model[1] for model in available_models if model[0] == x)
             )
 
-            # Text input field (NOTE: uses a different key now!)
+            # Text input field
             user_input = st.text_area(
                 "Enter your text here:",
                 value=st.session_state["text_input_value"],
@@ -316,7 +447,17 @@ elif page == "🔮 Single Prediction":
             if st.button("🚀 Predict", type="primary"):
                 if user_input.strip():
                     with st.spinner('Analyzing text...'):
-                        prediction, probabilities = make_prediction(user_input, model_choice, models)
+                        # Determine if DL model is selected
+                        if model_choice in ['cnn', 'lstm', 'rnn']:
+                            if embeddings_index is None:
+                                st.error("Embeddings not loaded. Cannot use DL model.")
+                                prediction, probabilities = None, None
+                            else:
+                                prediction, probabilities = make_prediction_dl(
+                                    user_input, model_choice, models, embeddings_index
+                                )
+                        else:
+                            prediction, probabilities = make_prediction(user_input, model_choice, models)
 
                         if prediction and probabilities is not None:
                             # Display prediction
@@ -418,7 +559,17 @@ elif page == "📁 Batch Processing":
                             progress_bar = st.progress(0)
 
                             for i, text in enumerate(texts):
-                                prediction, probabilities = make_prediction(text, model_choice, models)
+                                # Use DL prediction if selected model is CNN/LSTM/RNN
+                                if model_choice in ['cnn', 'lstm', 'rnn']:
+                                    if embeddings_index is None:
+                                        st.error("Embeddings not loaded. Cannot use DL model.")
+                                        prediction, probabilities = None, None
+                                    else:
+                                        prediction, probabilities = make_prediction_dl(
+                                            text, model_choice, models, embeddings_index
+                                        )
+                                else:
+                                    prediction, probabilities = make_prediction(text, model_choice, models)
 
                                 if prediction is not None and probabilities is not None:
                                     results.append({
@@ -517,7 +668,17 @@ elif page == "⚖️ Model Comparison":
                     comparison_results = []
 
                     for model_key, model_name in available_models:
-                        prediction, probabilities = make_prediction(comparison_text, model_key, models)
+                        # Use DL prediction if model is cnn, lstm, or rnn
+                        if model_key in ['cnn', 'lstm', 'rnn']:
+                            if embeddings_index is None:
+                                st.error(f"Embeddings not loaded. Cannot use {model_name}.")
+                                prediction, probabilities = None, None
+                            else:
+                                prediction, probabilities = make_prediction_dl(
+                                    comparison_text, model_key, models, embeddings_index
+                                )
+                        else:
+                            prediction, probabilities = make_prediction(comparison_text, model_key, models)
 
                         if prediction is not None and probabilities is not None:
                             comparison_results.append({
@@ -592,6 +753,18 @@ elif page == "📊 Model Info":
             - Robust to overfitting
             """)
 
+            st.markdown("""
+            ### 🧠 CNN (Convolutional Neural Network)
+            **Type:** Deep Learning Model  
+            **Architecture:** Conv1D + MaxPool + Dense  
+            **Features:** GloVe embeddings
+
+            **Strengths:**
+            - Captures local n-gram features
+            - Efficient for fixed-length inputs
+            - Strong baseline for text classification
+            """)
+
         with col2:
             st.markdown("""
             ### 🌳 Decision Tree
@@ -603,6 +776,18 @@ elif page == "📊 Model Info":
             - Easy to interpret
             - Handles non-linear patterns
             - Fast to train
+            """)
+
+            st.markdown("""
+            ### 🧠 LSTM (Long Short-Term Memory)
+            **Type:** Recurrent Neural Network  
+            **Architecture:** LSTM layers + Dense  
+            **Features:** GloVe embeddings
+
+            **Strengths:**
+            - Captures sequential dependencies
+            - Effective for long texts
+            - Handles context better than vanilla RNNs
             """)
 
         st.markdown("---")
@@ -621,6 +806,18 @@ elif page == "📊 Model Info":
             - Probabilistic output
             """)
 
+            st.markdown("""
+            ### 🧠 RNN (Simple Recurrent Neural Network)
+            **Type:** Recurrent Neural Network  
+            **Architecture:** RNN layers + Dense  
+            **Features:** GloVe embeddings
+
+            **Strengths:**
+            - Captures sequential patterns
+            - Lightweight compared to LSTM
+            - Quick baseline for text sequence tasks
+            """)
+
         with col2:
             st.markdown("""
             ### 🔤 Feature Engineering
@@ -629,6 +826,10 @@ elif page == "📊 Model Info":
             - N-grams: Unigrams + Bigrams  
             - Stop Words: Removed (English)  
             - Extra Features (optional): Avg sentence length, punctuation %, etc.
+
+            **Embeddings:** GloVe  
+            - Dimension: 100  
+            - Max Sequence Length: 100 tokens
             """)
 
         # File status
@@ -639,7 +840,10 @@ elif page == "📊 Model Info":
             ("tfidf_vectorizer.pkl", "TF-IDF Vectorizer", models.get('vectorizer_available', False)),
             ("svm_model.pkl", "SVM Classifier", models.get('svm_available', False)),
             ("decision_tree_model.pkl", "Decision Tree Classifier", models.get('dt_available', False)),
-            ("adaboost_model.pkl", "AdaBoost Classifier", models.get('ab_available', False))
+            ("adaboost_model.pkl", "AdaBoost Classifier", models.get('ab_available', False)),
+            ("CNN.pt", "CNN Deep Learning Model", models.get('cnn_available', False)),
+            ("LSTM.pt", "LSTM Deep Learning Model", models.get('lstm_available', False)),
+            ("RNN.pt", "RNN Deep Learning Model", models.get('rnn_available', False))
         ]
 
         for filename, description, status in files_to_check:
@@ -658,10 +862,10 @@ elif page == "📊 Model Info":
         **Training Data:** Labeled dataset of human-written and AI-generated texts  
         **Preprocessing:**  
         - Clean and normalize text  
-        - TF-IDF vectorization  
-        - Optional: custom linguistic features  
+        - TF-IDF vectorization (for ML models)  
+        - GloVe embeddings (for DL models)  
         **Evaluation:** Accuracy, precision, recall, F1-score, ROC-AUC  
-        **Validation:** 5-fold cross-validation  
+        **Validation:** 5-fold cross-validation (ML models), holdout validation (DL models)
         """)
     else:
         st.warning("Models not loaded. Please check model files in the `models/` directory.")
@@ -675,7 +879,7 @@ elif page == "❓ Help":
 
     with st.expander("🔮 Single Prediction"):
         st.write("""
-        1. **Select a model** from the dropdown (SVM, Decision Tree, or AdaBoost)
+        1. **Select a model** from the dropdown (SVM, Decision Tree, AdaBoost, CNN, LSTM, or RNN)
         2. **Enter text** manually or paste it from any document (essay, blog post, etc.)
         3. **Click 'Predict'** to classify the text as AI or Human-written
         4. **View the results:** prediction label, confidence score, and probability breakdown
@@ -689,7 +893,7 @@ elif page == "❓ Help":
            - **.csv file:** Text in the first column
            - **.pdf or .docx:** Multi-paragraph files, text will be auto-extracted
         2. **Upload the file** using the uploader
-        3. **Select the model** you'd like to use for classification
+        3. **Select the model** you'd like to use for classification (including Deep Learning models)
         4. **Click 'Process File'** to run predictions on all texts
         5. **Download the results** as a CSV file with predictions and confidence scores
         """)
@@ -710,8 +914,12 @@ elif page == "❓ Help":
         **Models not loading:**
         - Confirm all model files are in the `models/` folder
         - Ensure the following files exist:
-          - `tfidf_vectorizer.pkl` (required for all models)
+          - `tfidf_vectorizer.pkl` (required for SVM, Decision Tree, AdaBoost)
           - `svm_model.pkl`, `decision_tree_model.pkl`, `adaboost_model.pkl`
+          - `CNN.pt`, `LSTM.pt`, `RNN.pt` (required for Deep Learning models)
+
+        **Embeddings not loaded:**
+        - Ensure `glove.6B.100d.txt` is present in the project directory for DL models
 
         **Prediction issues:**
         - Make sure the input is valid text (not empty or corrupted)
@@ -727,16 +935,21 @@ elif page == "❓ Help":
     st.code("""
     ai_human_detection_project/
     ├── app.py                       # Main Streamlit app
-    ├── requirements.txt            # Required packages
-    ├── models/                     # Saved models
+    ├── requirements.txt             # Required packages
+    ├── models/                      # Saved models
     │   ├── tfidf_vectorizer.pkl
     │   ├── svm_model.pkl
     │   ├── decision_tree_model.pkl
-    │   └── adaboost_model.pkl
-    ├── data/                       # Training/test data
-    ├── notebooks/                 # Jupyter notebook work
-    └── README.md                  # Documentation
+    │   ├── adaboost_model.pkl
+    │   ├── CNN.pt
+    │   ├── LSTM.pt
+    │   └── RNN.pt
+    ├── glove.6B.100d.txt            # GloVe embeddings file for DL models
+    ├── data/                        # Training/test data
+    ├── notebooks/                   # Jupyter notebook work
+    └── README.md                    # Documentation
     """)
+
 
 
 # ============================================================================
@@ -749,12 +962,15 @@ st.sidebar.info("""
 **AI vs Human Text Detection App**  
 Built with Streamlit
 
-**Models:**  
+**Models Included:**  
 - 📈 Support Vector Machine (SVM)  
 - 🌳 Decision Tree  
 - ⚡ AdaBoost  
+- 🧠 CNN (Convolutional Neural Network)  
+- 🧠 LSTM (Long Short-Term Memory)  
+- 🧠 RNN (Recurrent Neural Network)
 
-**Framework:** scikit-learn  
+**Frameworks:** scikit-learn, PyTorch  
 **Deployment:** Streamlit Cloud Ready  
 """)
 
@@ -763,6 +979,6 @@ st.markdown("""
 <div style='text-align: center; color: #666666;'>
     Built with ❤️ using Streamlit | AI vs Human Text Classification Project<br>
     <small>Developed for the course project: <strong>Intro to Large Language Models / AI Agents</strong></small><br>
-    <small>This app detects whether text was written by a human or generated by AI</small>
+    <small>This app detects whether text was written by a human or generated by AI using Machine Learning and Deep Learning models.</small>
 </div>
 """, unsafe_allow_html=True)
