@@ -257,6 +257,39 @@ def make_prediction_dl(text, model_choice, models, embeddings_index, max_len=100
         st.error(f"Error making DL prediction: {e}")
         return None, None
 
+def make_prediction(text, model_choice, models):
+    if models is None:
+        return None, None
+
+    try:
+        model = models.get(model_choice)
+        if model is None:
+            st.error("Model not found")
+            return None, None
+
+        # Determine if model is a pipeline (includes vectorizer)
+        is_pipeline = hasattr(model, 'named_steps')  # sklearn pipeline check
+
+        if is_pipeline:
+            prediction = model.predict([text])[0]
+            probabilities = model.predict_proba([text])[0]
+        else:
+            vectorizer = models.get('vectorizer')
+            if vectorizer is None:
+                st.error("Vectorizer not loaded")
+                return None, None
+            text_vector = vectorizer.transform([text])
+            prediction = model.predict(text_vector)[0]
+            probabilities = model.predict_proba(text_vector)[0]
+
+        class_names = ['Human', 'AI']
+        prediction_label = class_names[prediction]
+        return prediction_label, probabilities
+
+    except Exception as e:
+        st.error(f"Error making prediction: {e}")
+        return None, None
+
 
 
 def get_available_models(models):
