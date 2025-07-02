@@ -4,6 +4,7 @@
 # https://chatgpt.com/share/685a1cd9-fbe8-8002-b8dd-aa0349c93e7a
 #https://chatgpt.com/share/685aee73-bc9c-8002-ae26-f7b19274666c
 #https://chatgpt.com/share/685b2cab-0d0c-8002-86a4-9245f4a85bd6
+#https://chatgpt.com/share/68657bd0-45b0-8002-bee0-e6b543548e4c
 
 import streamlit as st
 import pandas as pd

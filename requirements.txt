@@ -2,8 +2,12 @@ streamlit
 pandas
 numpy
 scikit-learn
-joblib
-matplotlib==3.8.4
-seaborn
 pdfplumber
 python-docx
+matplotlib
+seaborn
+torch
+torchvision
+nltk
+spacy
+joblib
