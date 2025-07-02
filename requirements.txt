@@ -1,3 +1,10 @@
-version https://git-lfs.github.com/spec/v1
-oid sha256:227087b6ba467a9aff05babdd5f0c5e714eb2223b2774410dc5e029c578f759b
-size 114
+streamlit
+pandas
+numpy
+scikit-learn
+matplotlib
+seaborn
+pdfplumber
+python-docx
+torch
+torchtext
