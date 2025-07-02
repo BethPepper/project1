@@ -16,7 +16,6 @@ import pdfplumber
 import docx
 import torch
 import torch.nn as nn
-import numpy as np
 
 # =======================
 # Deep Learning Models
@@ -58,8 +57,11 @@ class TextRNN(nn.Module):
         rnn_out, h_n = self.rnn(x)
         out = self.fc1(h_n[-1])
         return out
-    
-    
+
+# =======================
+# GloVe Embedding Loader
+# =======================
+
 def load_glove(glove_file):
     embeddings_index = {}
     with open(glove_file, encoding='utf-8') as f:
@@ -69,8 +71,6 @@ def load_glove(glove_file):
             coefs = np.asarray(values[1:], dtype='float32')
             embeddings_index[word] = coefs
     return embeddings_index
-
-
 
 
 # Page Configuration
