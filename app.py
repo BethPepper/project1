@@ -61,6 +61,21 @@ class TextRNN(nn.Module):
 # =======================
 # GloVe Embedding Loader
 # =======================
+import os
+import urllib.request
+import zipfile
+
+def download_glove():
+    glove_dir = "glove.6B.100d.txt"
+    if not os.path.exists(glove_dir):
+        url = "http://nlp.stanford.edu/data/glove.6B.zip"
+        print("Downloading GloVe embeddings...")
+        urllib.request.urlretrieve(url, "glove.6B.zip")
+        with zipfile.ZipFile("glove.6B.zip", 'r') as zip_ref:
+            zip_ref.extractall(".")
+        print("Download and extraction complete.")
+
+download_glove()
 
 def load_glove(glove_file):
     embeddings_index = {}
