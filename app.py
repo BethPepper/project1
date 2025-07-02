@@ -32,7 +32,27 @@ class TextCNN(nn.Module):
         x = self.fc1(x)
         return x
 
-# Also define TextLSTM and TextRNN here as separate classes
+class TextLSTM(nn.Module):
+    def __init__(self):
+        super(TextLSTM, self).__init__()
+        self.lstm = nn.LSTM(input_size=100, hidden_size=128, batch_first=True)
+        self.fc1 = nn.Linear(128, 2)
+
+    def forward(self, x):
+        lstm_out, (h_n, c_n) = self.lstm(x)
+        out = self.fc1(h_n[-1])
+        return out
+
+class TextRNN(nn.Module):
+    def __init__(self):
+        super(TextRNN, self).__init__()
+        self.rnn = nn.RNN(input_size=100, hidden_size=128, batch_first=True)
+        self.fc1 = nn.Linear(128, 2)
+
+    def forward(self, x):
+        rnn_out, h_n = self.rnn(x)
+        out = self.fc1(h_n[-1])
+        return out
 
 
 
